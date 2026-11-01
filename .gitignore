@@ -1,15 +1,123 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# =============================================================================
+# ResolveX — Complete Project .gitignore
+# Preserves Android Studio, Gradle, Kotlin, Node/Web, and Security Ignore Rules
+# =============================================================================
+
+# --- Built Application & Library Binaries ---
+*.apk
+*.ap_
+*.aab
+*.dex
+
+# --- Gradle Build Cache & Outputs ---
+.gradle/
+build/
+*/build/
+
+# --- Local Configuration & Environment Variables ---
 local.properties
+signing.properties
+.env
+.env.*
+!.env.example
+
+# --- Keystores, Certificates & Sensitive Credentials ---
+*.jks
+*.keystore
+*.key
+*.pem
+*.pk8
+*.p12
+*.bks
+google-services.json
+credentials.json
+secrets.xml
+
+# --- Android Studio & IntelliJ IDEA Files ---
+*.iml
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/shelf/
+.idea/deploymentTargetDropDown.xml
+.idea/deploymentTargetSelector.xml
+
+# --- Native Build Artifacts ---
+.externalNativeBuild/
+.cxx/
+ndkBuild/
+
+# --- Profiling & Diagnostic Captures ---
+captures/
+*.hprof
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# --- OS Generated Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# --- Runtime Data ---
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# --- Test Coverage ---
+lib-cov/
+coverage/
+*.lcov
+.nyc_output/
+
+# --- Web & Package Tooling Caches (Preserved from Remote) ---
+bower_components/
+node_modules/
+jspm_packages/
+web_modules/
+*.tsbuildinfo
+.npm/
+.eslintcache
+.stylelintcache
+.node_repl_history
+*.tgz
+.yarn-integrity
+.cache/
+.parcel-cache/
+.next/
+out/
+.nuxt/
+dist/
+.output/
+.temp/
+.svelte-kit/
+.docusaurus/
+.serverless/
+.fusebox/
+.dynamodb/
+.firebase/
+.vscode-test/
+.pnpm-store/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.vite/
+.astro/
+.turbo/
