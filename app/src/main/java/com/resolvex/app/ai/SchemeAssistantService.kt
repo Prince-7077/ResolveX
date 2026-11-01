@@ -52,6 +52,12 @@ class SchemeAssistantService(private val context: Context? = null) {
         const val STANDARD_OFF_TOPIC_REDIRECT =
             "I'm ResolveX AI, designed to help with government schemes, policies, civic issues and public services. I can assist you with these topics."
 
+        val CANDIDATE_MODELS = listOf(
+            "gemini-3.1-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash"
+        )
+
         val SUPPORTED_LANGUAGES = listOf(
             SupportedLanguage("en", "English", "English", "en-IN"),
             SupportedLanguage("hi", "Hindi", "हिंदी", "hi-IN"),
@@ -87,7 +93,7 @@ class SchemeAssistantService(private val context: Context? = null) {
     ): SchemeChatMessage = withContext(Dispatchers.IO) {
         val apiKey = configManager?.getGeminiApiKey() ?: System.getenv("GEMINI_API_KEY")
 
-        // 1. If Gemini API Key is available, invoke Gemini 3.8 Flash
+        // 1. If Gemini API Key is available, invoke Gemini Cloud AI
         if (!apiKey.isNullOrBlank()) {
             try {
                 val cloudResponse = callGeminiForScheme(apiKey, userQuery, selectedLanguage, conversationHistory)
@@ -95,13 +101,14 @@ class SchemeAssistantService(private val context: Context? = null) {
                     return@withContext cloudResponse
                 }
             } catch (e: Exception) {
-                // If cloud fails, return transparent informative message with on-device knowledge base
+                android.util.Log.w("SchemeAssistantService", "Gemini cloud call failed: ${e.message}", e)
                 val fallback = generateVerifiedFallbackResponse(userQuery, selectedLanguage)
                 val errorMessage = when {
+                    e is java.net.SocketTimeoutException -> "ResolveX Cloud AI network connection timed out. Displaying verified on-device reference:\n\n"
                     e.message?.contains("429") == true -> "ResolveX AI is experiencing high traffic (Rate Limit). Displaying verified on-device reference:\n\n"
                     e.message?.contains("403") == true -> "ResolveX AI authentication error (Invalid API Key). Displaying verified on-device reference:\n\n"
-                    e.message?.contains("timed out") == true || e.message?.contains("timeout") == true -> "ResolveX AI connection timed out. Displaying verified on-device reference:\n\n"
-                    else -> "ResolveX Cloud AI is unreachable. Displaying verified on-device reference:\n\n"
+                    e is java.net.UnknownHostException -> "No internet connection detected. Displaying verified on-device reference:\n\n"
+                    else -> "ResolveX Cloud AI is temporarily busy (${e.javaClass.simpleName}). Displaying verified on-device reference:\n\n"
                 }
                 return@withContext fallback.copy(
                     text = errorMessage + fallback.text,
@@ -120,16 +127,6 @@ class SchemeAssistantService(private val context: Context? = null) {
         selectedLanguage: SupportedLanguage,
         history: List<SchemeChatMessage>
     ): SchemeChatMessage? {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
-        val url = URL(endpoint)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.setRequestProperty("x-goog-api-key", apiKey)
-        conn.connectTimeout = 12000
-        conn.readTimeout = 15000
-        conn.doOutput = true
-
         val systemInstructionText = """
             You are ResolveX AI, the official Multilingual Civic & Government Welfare Assistant for India (ResolveX — "Your Voice. Real Change.").
             
@@ -155,12 +152,15 @@ class SchemeAssistantService(private val context: Context? = null) {
             5. Free Welfare Guarantee: Remind citizens that government applications on official portals do not charge hidden middlemen fees.
         """.trimIndent()
 
-        // Build multi-turn context
-        val contentsArray = JSONArray()
+        // Clean previous conversation context without duplicate trailing user turn
+        val previousHistory = if (history.isNotEmpty() && history.last().isUser && history.last().text == userQuery) {
+            history.dropLast(1)
+        } else {
+            history
+        }.filter { !it.isError }.takeLast(6)
 
-        // Include recent conversation context (last 6 messages)
-        val recentHistory = history.filter { !it.isError }.takeLast(6)
-        for (item in recentHistory) {
+        val contentsArray = JSONArray()
+        for (item in previousHistory) {
             val role = if (item.isUser) "user" else "model"
             contentsArray.put(JSONObject().apply {
                 put("role", role)
@@ -191,44 +191,75 @@ class SchemeAssistantService(private val context: Context? = null) {
             })
         }
 
-        OutputStreamWriter(conn.outputStream).use { writer ->
-            writer.write(requestJson.toString())
-            writer.flush()
-        }
+        val requestBody = requestJson.toString()
+        var lastException: Exception? = null
 
-        val code = conn.responseCode
-        if (code == 200) {
-            val responseText = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-            val root = JSONObject(responseText)
-            val candidates = root.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val candidate = candidates.getJSONObject(0)
-                val content = candidate.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                if (parts != null && parts.length() > 0) {
-                    val answerText = parts.getJSONObject(0).optString("text", "").trim()
-                    if (answerText.isNotBlank()) {
-                        val links = extractOfficialLinks(answerText)
-                        return SchemeChatMessage(
-                            text = answerText,
-                            isUser = false,
-                            sourceLinks = links,
-                            languageCode = selectedLanguage.code,
-                            isCloudGenerated = true
-                        )
+        for (modelName in CANDIDATE_MODELS) {
+            try {
+                val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+                val url = URL(endpoint)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.setRequestProperty("x-goog-api-key", apiKey)
+                conn.connectTimeout = 10000
+                conn.readTimeout = 25000
+                conn.doOutput = true
+
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(requestBody)
+                    writer.flush()
+                }
+
+                val code = conn.responseCode
+                if (code == 200) {
+                    val responseText = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
+                    val root = JSONObject(responseText)
+                    val candidates = root.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val candidate = candidates.getJSONObject(0)
+                        val content = candidate.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        if (parts != null && parts.length() > 0) {
+                            val answerText = parts.getJSONObject(0).optString("text", "").trim()
+                            if (answerText.isNotBlank()) {
+                                val links = extractOfficialLinks(answerText)
+                                return SchemeChatMessage(
+                                    text = answerText,
+                                    isUser = false,
+                                    sourceLinks = links,
+                                    languageCode = selectedLanguage.code,
+                                    isCloudGenerated = true
+                                )
+                            }
+                        }
                     }
+                } else if (code == 429) {
+                    val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    throw IllegalStateException("Gemini API Rate Limit (429): $errBody")
+                } else if (code == 403) {
+                    val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    throw IllegalStateException("Gemini API Authentication Error (403): $errBody")
+                } else {
+                    val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    lastException = IllegalStateException("Gemini API ($modelName) HTTP $code: $errBody")
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (e.message?.contains("403") == true || e.message?.contains("429") == true) {
+                    throw e
                 }
             }
-        } else {
-            val errStream = conn.errorStream
-            val errBody = errStream?.bufferedReader()?.use { it.readText() } ?: ""
-            throw IllegalStateException("Gemini API HTTP $code: $errBody")
+        }
+
+        if (lastException != null) {
+            throw lastException
         }
         return null
     }
 
     /**
-     * Civic Circular & Scheme Fact Verification via Gemini 3.8 Flash.
+     * Civic Circular & Scheme Fact Verification via Google Gemini Cloud AI.
      * Evaluates viral forwards, circulars, and welfare claims against official Indian registries.
      */
     suspend fun verifyCircularFact(
@@ -242,7 +273,7 @@ class SchemeAssistantService(private val context: Context? = null) {
                 val cloudResult = callGeminiForFactVerification(apiKey, claimText, selectedLanguage)
                 if (cloudResult != null) return@withContext cloudResult
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.w("SchemeAssistantService", "Gemini fact verification failed: ${e.message}", e)
             }
         }
 
@@ -254,16 +285,6 @@ class SchemeAssistantService(private val context: Context? = null) {
         claimText: String,
         lang: SupportedLanguage
     ): FactVerificationResult? {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
-        val url = URL(endpoint)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.setRequestProperty("x-goog-api-key", apiKey)
-        conn.connectTimeout = 12000
-        conn.readTimeout = 15000
-        conn.doOutput = true
-
         val prompt = """
             You are ResolveX Fact Verification Engine for Indian Civic & Government Schemes.
             Evaluate this claimed government circular or scheme forward:
@@ -301,55 +322,87 @@ class SchemeAssistantService(private val context: Context? = null) {
             })
         }
 
-        OutputStreamWriter(conn.outputStream).use { writer ->
-            writer.write(requestJson.toString())
-            writer.flush()
-        }
+        val requestBody = requestJson.toString()
+        var lastException: Exception? = null
 
-        val code = conn.responseCode
-        if (code == 200) {
-            val responseText = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-            val root = JSONObject(responseText)
-            val candidates = root.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val candidate = candidates.getJSONObject(0)
-                val content = candidate.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                if (parts != null && parts.length() > 0) {
-                    val raw = parts.getJSONObject(0).optString("text", "")
-                    val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                    val parsed = JSONObject(cleaned)
+        for (modelName in CANDIDATE_MODELS) {
+            try {
+                val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+                val url = URL(endpoint)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.setRequestProperty("x-goog-api-key", apiKey)
+                conn.connectTimeout = 10000
+                conn.readTimeout = 25000
+                conn.doOutput = true
 
-                    val statusStr = parsed.optString("status", "UNVERIFIED").uppercase(Locale.getDefault())
-                    val verdict = when (statusStr) {
-                        "VERIFIED" -> FactVerdict.VERIFIED
-                        "LIKELY_FAKE" -> FactVerdict.LIKELY_FAKE
-                        else -> FactVerdict.UNVERIFIED
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(requestBody)
+                    writer.flush()
+                }
+
+                val code = conn.responseCode
+                if (code == 200) {
+                    val responseText = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
+                    val root = JSONObject(responseText)
+                    val candidates = root.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val candidate = candidates.getJSONObject(0)
+                        val content = candidate.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        if (parts != null && parts.length() > 0) {
+                            val raw = parts.getJSONObject(0).optString("text", "")
+                            val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                            val parsed = JSONObject(cleaned)
+
+                            val statusStr = parsed.optString("status", "UNVERIFIED").uppercase(Locale.getDefault())
+                            val verdict = when (statusStr) {
+                                "VERIFIED" -> FactVerdict.VERIFIED
+                                "LIKELY_FAKE" -> FactVerdict.LIKELY_FAKE
+                                else -> FactVerdict.UNVERIFIED
+                            }
+
+                            val rfJson = parsed.optJSONArray("redFlags")
+                            val rfList = mutableListOf<String>()
+                            if (rfJson != null) {
+                                for (i in 0 until rfJson.length()) rfList.add(rfJson.optString(i))
+                            }
+
+                            val srcJson = parsed.optJSONArray("sources")
+                            val srcList = mutableListOf<String>()
+                            if (srcJson != null) {
+                                for (i in 0 until srcJson.length()) srcList.add(srcJson.optString(i))
+                            }
+                            if (srcList.isEmpty()) srcList.add("https://pib.gov.in/factcheck")
+
+                            return FactVerificationResult(
+                                verdict = verdict,
+                                headline = parsed.optString("headline", verdict.label),
+                                explanation = parsed.optString("explanation", ""),
+                                redFlags = rfList,
+                                verifiedSources = srcList,
+                                isCloudAnalyzed = true
+                            )
+                        }
                     }
-
-                    val rfJson = parsed.optJSONArray("redFlags")
-                    val rfList = mutableListOf<String>()
-                    if (rfJson != null) {
-                        for (i in 0 until rfJson.length()) rfList.add(rfJson.optString(i))
-                    }
-
-                    val srcJson = parsed.optJSONArray("sources")
-                    val srcList = mutableListOf<String>()
-                    if (srcJson != null) {
-                        for (i in 0 until srcJson.length()) srcList.add(srcJson.optString(i))
-                    }
-                    if (srcList.isEmpty()) srcList.add("https://pib.gov.in/factcheck")
-
-                    return FactVerificationResult(
-                        verdict = verdict,
-                        headline = parsed.optString("headline", verdict.label),
-                        explanation = parsed.optString("explanation", ""),
-                        redFlags = rfList,
-                        verifiedSources = srcList,
-                        isCloudAnalyzed = true
-                    )
+                } else if (code == 429 || code == 403) {
+                    val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    throw IllegalStateException("Gemini API HTTP $code: $errBody")
+                } else {
+                    val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    lastException = IllegalStateException("Gemini API ($modelName) HTTP $code: $errBody")
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (e.message?.contains("403") == true || e.message?.contains("429") == true) {
+                    throw e
                 }
             }
+        }
+
+        if (lastException != null) {
+            throw lastException
         }
         return null
     }

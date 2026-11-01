@@ -22,8 +22,10 @@ class AiConfigManager(context: Context) {
     }
 
     fun getGeminiApiKey(): String? {
-        val key = prefs.getString(KEY_GEMINI_API_KEY, null)?.trim()
-        if (!key.isNullOrBlank()) return key
+        val customKey = prefs.getString(KEY_GEMINI_API_KEY, null)?.trim()
+        if (!customKey.isNullOrBlank() && customKey.length > 20 && !customKey.startsWith("dummy", ignoreCase = true)) {
+            return customKey
+        }
         if (BuildConfig.GEMINI_API_KEY.isNotBlank()) return BuildConfig.GEMINI_API_KEY.trim()
         val envKey = try { System.getenv("GEMINI_API_KEY")?.trim() } catch (e: Exception) { null }
         if (!envKey.isNullOrBlank()) return envKey

@@ -411,15 +411,7 @@ class AiComplaintService(private val context: Context? = null) {
         description: String,
         location: String?
     ): AiAnalysisResult? {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
-        val url = URL(endpoint)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.setRequestProperty("x-goog-api-key", apiKey)
-        conn.connectTimeout = 12000
-        conn.readTimeout = 12000
-        conn.doOutput = true
+        val candidateModels = listOf("gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash")
 
         val prompt = """
             You are ResolveX AI Civic Intelligence Assistant for Indian Municipal Governance.
@@ -454,45 +446,63 @@ class AiComplaintService(private val context: Context? = null) {
             put("contents", contents)
         }
 
-        OutputStreamWriter(conn.outputStream).use { writer ->
-            writer.write(requestJson.toString())
-            writer.flush()
-        }
+        val requestBody = requestJson.toString()
 
-        val responseCode = conn.responseCode
-        if (responseCode == 200) {
-            val responseText = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-            val root = JSONObject(responseText)
-            val candidates = root.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val candidate = candidates.getJSONObject(0)
-                val content = candidate.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                if (parts != null && parts.length() > 0) {
-                    val rawText = parts.getJSONObject(0).optString("text", "")
-                    val cleanedJsonStr = rawText.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                    val parsed = JSONObject(cleanedJsonStr)
-                    val kwJson = parsed.optJSONArray("keywords")
-                    val keywordsList = mutableListOf<String>()
-                    if (kwJson != null) {
-                        for (i in 0 until kwJson.length()) {
-                            keywordsList.add(kwJson.optString(i))
+        for (modelName in candidateModels) {
+            try {
+                val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+                val url = URL(endpoint)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.setRequestProperty("x-goog-api-key", apiKey)
+                conn.connectTimeout = 8000
+                conn.readTimeout = 20000
+                conn.doOutput = true
+
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(requestBody)
+                    writer.flush()
+                }
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
+                    val responseText = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
+                    val root = JSONObject(responseText)
+                    val candidates = root.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val candidate = candidates.getJSONObject(0)
+                        val content = candidate.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        if (parts != null && parts.length() > 0) {
+                            val rawText = parts.getJSONObject(0).optString("text", "")
+                            val cleanedJsonStr = rawText.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                            val parsed = JSONObject(cleanedJsonStr)
+                            val kwJson = parsed.optJSONArray("keywords")
+                            val keywordsList = mutableListOf<String>()
+                            if (kwJson != null) {
+                                for (i in 0 until kwJson.length()) {
+                                    keywordsList.add(kwJson.optString(i))
+                                }
+                            }
+                            return AiAnalysisResult(
+                                detectedCategory = parsed.optString("category", "Other Civic Issue"),
+                                recommendedDepartment = parsed.optString("department", "Municipal Governance Division"),
+                                urgency = parsed.optString("urgency", "Medium"),
+                                urgencyReason = parsed.optString("urgencyReason", "Analyzed by Google Gemini Cloud AI"),
+                                summary = parsed.optString("summary", title),
+                                duplicateMatch = null,
+                                extractedKeywords = keywordsList,
+                                suggestedNextAction = parsed.optString("suggestedNextAction", "Verify on-site and assign to field supervisor."),
+                                confidenceExplanation = parsed.optString("explanation", "Evaluated by Google Gemini multimodal civic intelligence engine."),
+                                isAiBackendConnected = true,
+                                modelInfo = "Google Gemini Cloud AI"
+                            )
                         }
                     }
-                    return AiAnalysisResult(
-                        detectedCategory = parsed.optString("category", "Other Civic Issue"),
-                        recommendedDepartment = parsed.optString("department", "Municipal Governance Division"),
-                        urgency = parsed.optString("urgency", "Medium"),
-                        urgencyReason = parsed.optString("urgencyReason", "Analyzed by Google Gemini 3.8 Flash"),
-                        summary = parsed.optString("summary", title),
-                        duplicateMatch = null,
-                        extractedKeywords = keywordsList,
-                        suggestedNextAction = parsed.optString("suggestedNextAction", "Verify on-site and assign to field supervisor."),
-                        confidenceExplanation = parsed.optString("explanation", "Evaluated by Google Gemini multimodal civic intelligence engine."),
-                        isAiBackendConnected = true,
-                        modelInfo = "Google Gemini 3.8 Flash"
-                    )
                 }
+            } catch (e: Exception) {
+                // Try next candidate model
             }
         }
         return null
