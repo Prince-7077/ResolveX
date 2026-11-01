@@ -411,13 +411,14 @@ class AiComplaintService(private val context: Context? = null) {
         description: String,
         location: String?
     ): AiAnalysisResult? {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
         val url = URL(endpoint)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
+        conn.setRequestProperty("x-goog-api-key", apiKey)
+        conn.connectTimeout = 12000
+        conn.readTimeout = 12000
         conn.doOutput = true
 
         val prompt = """
@@ -482,14 +483,14 @@ class AiComplaintService(private val context: Context? = null) {
                         detectedCategory = parsed.optString("category", "Other Civic Issue"),
                         recommendedDepartment = parsed.optString("department", "Municipal Governance Division"),
                         urgency = parsed.optString("urgency", "Medium"),
-                        urgencyReason = parsed.optString("urgencyReason", "Analyzed by Gemini 1.5 Flash"),
+                        urgencyReason = parsed.optString("urgencyReason", "Analyzed by Google Gemini 3.8 Flash"),
                         summary = parsed.optString("summary", title),
                         duplicateMatch = null,
                         extractedKeywords = keywordsList,
                         suggestedNextAction = parsed.optString("suggestedNextAction", "Verify on-site and assign to field supervisor."),
                         confidenceExplanation = parsed.optString("explanation", "Evaluated by Google Gemini multimodal civic intelligence engine."),
                         isAiBackendConnected = true,
-                        modelInfo = "Google Gemini 1.5 Flash"
+                        modelInfo = "Google Gemini 3.8 Flash"
                     )
                 }
             }

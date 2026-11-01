@@ -2,6 +2,7 @@ package com.resolvex.app.ai
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.resolvex.app.BuildConfig
 
 class AiConfigManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -23,6 +24,7 @@ class AiConfigManager(context: Context) {
     fun getGeminiApiKey(): String? {
         val key = prefs.getString(KEY_GEMINI_API_KEY, null)?.trim()
         if (!key.isNullOrBlank()) return key
+        if (BuildConfig.GEMINI_API_KEY.isNotBlank()) return BuildConfig.GEMINI_API_KEY.trim()
         val envKey = try { System.getenv("GEMINI_API_KEY")?.trim() } catch (e: Exception) { null }
         if (!envKey.isNullOrBlank()) return envKey
         return null

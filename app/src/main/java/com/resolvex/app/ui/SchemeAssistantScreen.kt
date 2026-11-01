@@ -41,6 +41,8 @@ import androidx.navigation.NavController
 import com.resolvex.app.ai.SchemeAssistantService
 import com.resolvex.app.ai.SchemeChatMessage
 import com.resolvex.app.ai.SupportedLanguage
+import com.resolvex.app.ai.FactVerdict
+import com.resolvex.app.ai.FactVerificationResult
 import com.resolvex.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -172,7 +174,7 @@ fun SchemeAssistantScreen(navController: NavController) {
     // Civic Fact verification state
     var circularText by remember { mutableStateOf("") }
     var isVerifyingFact by remember { mutableStateOf(false) }
-    var factVerificationResult by remember { mutableStateOf<FactResult?>(null) }
+    var factVerificationResult by remember { mutableStateOf<FactVerificationResult?>(null) }
 
     // Voice recognition launcher
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -190,7 +192,9 @@ fun SchemeAssistantScreen(navController: NavController) {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage.speechLocale)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask your government scheme question...")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage.speechLocale)
+                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(selectedLanguage.speechLocale, "en-IN", "hi-IN"))
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask your government scheme question in ${selectedLanguage.nativeName}...")
                 }
                 speechLauncher.launch(intent)
             } catch (e: Exception) {
@@ -452,6 +456,8 @@ fun SchemeAssistantScreen(navController: NavController) {
                                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage.speechLocale)
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage.speechLocale)
+                                        putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(selectedLanguage.speechLocale, "en-IN", "hi-IN"))
                                         putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask in ${selectedLanguage.nativeName} (${selectedLanguage.englishName})...")
                                     }
                                     try {
@@ -555,8 +561,7 @@ fun SchemeAssistantScreen(navController: NavController) {
                             if (circularText.trim().length >= 10) {
                                 isVerifyingFact = true
                                 coroutineScope.launch {
-                                    delay(600)
-                                    factVerificationResult = verifyFact(circularText.trim())
+                                    factVerificationResult = assistantService.verifyCircularFact(circularText.trim(), selectedLanguage)
                                     isVerifyingFact = false
                                 }
                             } else {
@@ -586,59 +591,39 @@ fun SchemeAssistantScreen(navController: NavController) {
     }
 }
 
-data class FactResult(
-    val verdict: String,
-    val color: Color,
-    val explanation: String,
-    val redFlags: List<String>,
-    val verifiedSources: List<String>
-)
-
-fun verifyFact(query: String): FactResult {
-    val lower = query.lowercase()
-    return when {
-        lower.contains("registration fee") || lower.contains("send money") || lower.contains("otp") || lower.contains("bank pin") -> {
-            FactResult(
-                verdict = "⚠️ SUSPECTED SCAM / FAKE SCHEME",
-                color = Color(0xFFFF5252),
-                explanation = "Genuine Indian government schemes under DBT (Direct Benefit Transfer) never charge registration fees or solicit banking passwords/OTPs over WhatsApp.",
-                redFlags = listOf("Requests advance fee/charge", "Solicits banking or personal credentials", "Non-governmental contact links"),
-                verifiedSources = listOf("https://pib.gov.in/factcheck", "https://myscheme.gov.in")
-            )
-        }
-        lower.contains("kisan") || lower.contains("ayushman") || lower.contains("pmay") || lower.contains("surya ghar") || lower.contains("mudra") -> {
-            FactResult(
-                verdict = "✓ LIKELY AUTHENTIC GOVERNMENT PROGRAM",
-                color = Color(0xFF4ADE80),
-                explanation = "Matches authorized central welfare initiative registered with the Government of India portal.",
-                redFlags = listOf("Ensure applications are submitted strictly through official .gov.in domains"),
-                verifiedSources = listOf("https://myscheme.gov.in", "https://pmkisan.gov.in", "https://pmjay.gov.in")
-            )
-        }
-        else -> {
-            FactResult(
-                verdict = "ℹ️ INCONCLUSIVE / REQUIRES OFFICIAL GAZETTE",
-                color = Color(0xFFFBBF24),
-                explanation = "No matching central gazette notification found for this exact text. Verify with your local municipal ward office or PIB Fact Check before taking action.",
-                redFlags = listOf("Awaiting formal ministerial circular", "Verify on state portal before sharing"),
-                verifiedSources = listOf("https://pib.gov.in", "https://india.gov.in")
-            )
-        }
-    }
-}
-
 @Composable
-fun FactResultCard(result: FactResult) {
+fun FactResultCard(result: FactVerificationResult) {
+    val resultColor = Color(result.verdict.hexColor)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(NavyCard)
-            .border(1.dp, result.color.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .border(1.dp, resultColor.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(result.verdict, color = result.color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(result.headline, color = resultColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (result.isCloudAnalyzed) NeonPurple.copy(alpha = 0.2f) else Color(0xFF1E2E4E))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (result.isCloudAnalyzed) "🤖 Gemini 3.8 Flash" else "🛡️ Gazette Heuristic",
+                        color = if (result.isCloudAnalyzed) Color(0xFFA78BFA) else TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             Text(result.explanation, color = TextPrimary, fontSize = 12.sp, lineHeight = 16.sp)
 
             if (result.redFlags.isNotEmpty()) {
@@ -651,10 +636,23 @@ fun FactResultCard(result: FactResult) {
             }
 
             if (result.verifiedSources.isNotEmpty()) {
+                val context = LocalContext.current
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Verified Verification Authorities:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     result.verifiedSources.forEach { src ->
-                        Text("🔗 $src", color = ElectricCyan, fontSize = 11.sp)
+                        Text(
+                            text = "🔗 $src",
+                            color = ElectricCyan,
+                            fontSize = 11.sp,
+                            modifier = Modifier.clickable {
+                                try {
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(src))
+                                    context.startActivity(browserIntent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Cannot open browser: $src", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -705,8 +703,13 @@ private fun ChatBubble(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("🏛️", fontSize = 11.sp)
-                            Text("Official Welfare Navigator", color = ElectricCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(if (message.isCloudGenerated) "🤖" else "🏛️", fontSize = 11.sp)
+                            Text(
+                                text = if (message.isCloudGenerated) "ResolveX AI (Gemini)" else "Official Welfare Navigator",
+                                color = if (message.isCloudGenerated) Color(0xFFA78BFA) else ElectricCyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
                         // Listen / Stop TTS button

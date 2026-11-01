@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -669,17 +670,37 @@ private fun ComplaintDetailsSection(
                     }
                 }
 
-                // Attached Evidence indicators
+                // Attached Evidence indicators & preview
                 if (complaint.imageUri != null || complaint.videoUri != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (complaint.imageUri != null) {
-                            Text(text = "📷 Photo Evidence", color = SoftCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (complaint.imageUri != null) {
+                                Text(text = "📷 Photo Evidence Attached", color = SoftCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            if (complaint.videoUri != null) {
+                                Text(text = "🎥 Video Evidence", color = NeonPurple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
-                        if (complaint.videoUri != null) {
-                            Text(text = "🎥 Video Evidence", color = NeonPurple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                        if (complaint.imageUri != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(160.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.Black)
+                                    .border(0.5.dp, ElectricCyan.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            ) {
+                                AsyncImage(
+                                    model = complaint.imageUri,
+                                    contentDescription = "Grievance photo evidence",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
                         }
                     }
                 }
@@ -1362,7 +1383,9 @@ fun SlaStatusCard(complaint: Complaint) {
 @Composable
 fun BeforeAfterEvidenceCard(complaint: Complaint) {
     val hasCitizenPhoto = !complaint.imageUri.isNullOrBlank()
-    val hasAdminEvidence = complaint.adminEvidenceList.isNotEmpty() || !complaint.resolutionEvidenceUri.isNullOrBlank()
+    val adminPhotoUri = complaint.resolutionEvidenceUri
+        ?: complaint.adminEvidenceList.firstOrNull { it.mediaType == "PHOTO" }?.mediaUri
+    val hasAdminEvidence = !adminPhotoUri.isNullOrBlank() || complaint.adminEvidenceList.isNotEmpty()
 
     if (!hasCitizenPhoto && !hasAdminEvidence) return
 
@@ -1397,10 +1420,24 @@ fun BeforeAfterEvidenceCard(complaint: Complaint) {
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("BEFORE", color = Color(0xFFFF9800), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         if (hasCitizenPhoto) {
-                            Text("📷 Citizen Photo", color = SoftCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("Original grievance proof attached", color = TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black)
+                            ) {
+                                AsyncImage(
+                                    model = complaint.imageUri,
+                                    contentDescription = "Original citizen grievance photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Original grievance proof", color = SoftCyan, fontSize = 9.sp, textAlign = TextAlign.Center)
                         } else {
                             Text("No citizen photo", color = TextMuted, fontSize = 10.sp)
                         }
@@ -1418,8 +1455,25 @@ fun BeforeAfterEvidenceCard(complaint: Complaint) {
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("AFTER / ACTION", color = Color(0xFF4ADE80), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        if (hasAdminEvidence) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (!adminPhotoUri.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black)
+                            ) {
+                                AsyncImage(
+                                    model = adminPhotoUri,
+                                    contentDescription = "Official resolution photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Resolution proof", color = Color(0xFF4ADE80), fontSize = 9.sp, textAlign = TextAlign.Center)
+                        } else if (complaint.adminEvidenceList.isNotEmpty()) {
                             Text("✅ Rectification Proof", color = Color(0xFF4ADE80), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Text("${complaint.adminEvidenceList.size} inspection items filed", color = TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center)
                         } else {

@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import com.resolvex.app.util.ImageStorageHelper
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -889,8 +891,13 @@ fun AdminQueryWorkflowDialog(
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
-            selectedMediaUri = uri
-            selectedFileName = uri.lastPathSegment?.takeLast(20) ?: "evidence_file"
+            val safeUri = if (evidenceMediaType == "PHOTO") {
+                ImageStorageHelper.saveImageLocally(context, uri) ?: uri
+            } else {
+                uri
+            }
+            selectedMediaUri = safeUri
+            selectedFileName = safeUri.lastPathSegment?.takeLast(20) ?: "evidence_file"
         }
     }
 
@@ -1085,9 +1092,28 @@ fun AdminQueryWorkflowDialog(
                                     Text("Submitted: $dateStr", color = TextMuted, fontSize = 10.sp)
 
                                     if (complaint.imageUri != null || complaint.videoUri != null) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            if (complaint.imageUri != null) Text("📷 Citizen Photo Attached", color = SoftCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            if (complaint.videoUri != null) Text("🎥 Citizen Video Attached", color = NeonPurple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                if (complaint.imageUri != null) Text("📷 Citizen Photo Attached", color = SoftCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                if (complaint.videoUri != null) Text("🎥 Citizen Video Attached", color = NeonPurple, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            if (complaint.imageUri != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(140.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(Color.Black)
+                                                        .border(0.5.dp, SoftCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                                ) {
+                                                    AsyncImage(
+                                                        model = complaint.imageUri,
+                                                        contentDescription = "Citizen photo evidence",
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1181,6 +1207,24 @@ fun AdminQueryWorkflowDialog(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+
+                            if (evidenceMediaType == "PHOTO" && selectedMediaUri != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(130.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black)
+                                        .border(0.5.dp, ElectricCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                ) {
+                                    AsyncImage(
+                                        model = selectedMediaUri,
+                                        contentDescription = "Selected official evidence photo",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
                             }
 
                             // Remarks input

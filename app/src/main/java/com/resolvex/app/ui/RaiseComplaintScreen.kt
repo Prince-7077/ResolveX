@@ -100,6 +100,9 @@ import java.io.InputStream
 import java.util.Locale
 import com.resolvex.app.ai.AiComplaintService
 import com.resolvex.app.ai.AiAnalysisResult
+import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.PaddingValues
+import com.resolvex.app.util.ImageStorageHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,7 +192,8 @@ fun RaiseComplaintScreen(navController: NavController) {
     // Camera Launchers
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && tempCameraImageUri != null) {
-            attachedImageUri = tempCameraImageUri
+            val safeUri = ImageStorageHelper.saveImageLocally(context, tempCameraImageUri!!) ?: tempCameraImageUri
+            attachedImageUri = safeUri
         }
     }
 
@@ -201,7 +205,10 @@ fun RaiseComplaintScreen(navController: NavController) {
 
     // Gallery Launchers
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) attachedImageUri = uri
+        if (uri != null) {
+            val safeUri = ImageStorageHelper.saveImageLocally(context, uri) ?: uri
+            attachedImageUri = safeUri
+        }
     }
 
     val pickVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -1137,28 +1144,66 @@ fun RaiseComplaintScreen(navController: NavController) {
 
                     // Image preview
                     if (attachedImageUri != null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF0C162E))
+                                .border(1.dp, ElectricCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(text = "📷", fontSize = 16.sp)
-                                Text(
-                                    text = "Photo Attached (${attachedImageUri?.lastPathSegment?.takeLast(16) ?: "image.jpg"})",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp
-                                )
+                            Column {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .background(Color.Black)
+                                ) {
+                                    AsyncImage(
+                                        model = attachedImageUri,
+                                        contentDescription = "Attached grievance photo evidence",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+
+                                    // Top badge
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .align(Alignment.TopStart)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.Black.copy(alpha = 0.75f))
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("📷 Photo Evidence Attached", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // Bottom controls
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = { pickImageLauncher.launch("image/*") },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("🔄 Change Photo", color = SoftCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    TextButton(
+                                        onClick = {
+                                            ImageStorageHelper.deleteImageFile(attachedImageUri?.toString())
+                                            attachedImageUri = null
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("✕ Remove", color = Color(0xFFFF5252), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
-                            Text(
-                                text = "Remove",
-                                color = Color(0xFFFF5252),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clickable { attachedImageUri = null }
-                                    .padding(4.dp)
-                            )
                         }
                     }
 
